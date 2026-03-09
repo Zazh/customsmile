@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ study.patient_name }} — DICOM Viewer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #1a1a2e; color: #fff; }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            background: #16213e;
+            gap: 16px;
+        }
+        .header h1 { font-size: 16px; font-weight: 500; }
+        .header .meta { font-size: 13px; color: #aaa; }
+        .header a {
+            color: #4fc3f7;
+            text-decoration: none;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        .modes {
+            display: flex;
+            gap: 4px;
+        }
+        .modes button {
+            padding: 5px 14px;
+            border: 1px solid #4fc3f7;
+            background: transparent;
+            color: #4fc3f7;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.15s;
+        }
+        .modes button.active,
+        .modes button:hover {
+            background: #4fc3f7;
+            color: #000;
+        }
+        iframe {
+            width: 100%;
+            height: calc(100vh - 44px);
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>{{ study.patient_name }}</h1>
+            <span class="meta">{{ study.description }}</span>
+        </div>
+        <div class="modes">
+            <button data-mode="viewer" class="active">Просмотр</button>
+            <button data-mode="segmentation">Сегментация</button>
+        </div>
+        <a href="/admin/dicom/dicomstudy/">← Назад</a>
+    </div>
+    <iframe id="ohif" src="{{ ohif_url }}/viewer?StudyInstanceUIDs={{ study.orthanc_study_id|escapejs }}"></iframe>
+    <script>
+        var baseUrl = '{{ ohif_url|escapejs }}';
+        var studyUID = '{{ study.orthanc_study_id|escapejs }}';
+        var buttons = document.querySelectorAll('.modes button');
+        var iframe = document.getElementById('ohif');
+
+        buttons.forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                buttons.forEach(function(b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                var mode = btn.getAttribute('data-mode');
+                iframe.src = baseUrl + '/' + mode + '?StudyInstanceUIDs=' + studyUID;
+            });
+        });
+    </script>
+</body>
+</html>

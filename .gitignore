@@ -1,0 +1,11 @@
+*.pyc
+__pycache__/
+*.env
+.env
+.idea/
+*.sqlite3
+media/
+dental_stack_brainstorm.md
+*.log
+.DS_Store
+staticfiles/
