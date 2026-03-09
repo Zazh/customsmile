@@ -8,7 +8,7 @@ from .services import upload_to_orthanc
 
 @admin.register(DicomStudy)
 class DicomStudyAdmin(admin.ModelAdmin):
-    list_display = ["patient_name", "description", "uploaded_at", "viewer_link"]
+    list_display = ["patient", "description", "uploaded_at", "viewer_link"]
     readonly_fields = ["orthanc_study_id", "uploaded_at", "viewer_link"]
 
     def viewer_link(self, obj):

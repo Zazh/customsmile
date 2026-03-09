@@ -23,6 +23,8 @@ def _upload_single_file(file_path: str) -> str | None:
         )
     if resp.status_code == 200:
         data = resp.json()
+        if isinstance(data, list):
+            data = data[0] if data else {}
         parent_study = data.get("ParentStudy")
         if parent_study:
             return _get_study_instance_uid(parent_study)
@@ -52,7 +54,11 @@ def _upload_zip(zip_path: str) -> str | None:
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(tmpdir, filter="data")
+                for member in zf.namelist():
+                    if os.path.isabs(member) or ".." in member:
+                        logger.error("Zip path traversal detected: %s", member)
+                        return None
+                zf.extractall(tmpdir)
         except NotImplementedError:
             logger.error("ZIP uses unsupported compression: %s", zip_path)
             return None

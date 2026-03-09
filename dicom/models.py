@@ -5,7 +5,12 @@ from django.db import models
 
 class DicomStudy(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    patient_name = models.CharField("Имя пациента", max_length=255)
+    patient = models.ForeignKey(
+        "patient.Patient",
+        on_delete=models.CASCADE,
+        related_name="dicom_studies",
+        verbose_name="Пациент",
+    )
     description = models.CharField("Описание исследования", max_length=255, blank=True)
     file = models.FileField("DICOM файл (.dcm / .zip)", upload_to="dicom/%Y/%m/%d/")
     orthanc_study_id = models.CharField(max_length=255, blank=True, editable=False)
@@ -17,4 +22,4 @@ class DicomStudy(models.Model):
         ordering = ["-uploaded_at"]
 
     def __str__(self):
-        return f"{self.patient_name} — {self.description or 'без описания'}"
+        return f"{self.patient} — {self.description or 'без описания'}"

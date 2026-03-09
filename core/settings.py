@@ -13,17 +13,40 @@ CSRF_TRUSTED_ORIGINS = os.environ.get(
     'DJANGO_CSRF_TRUSTED_ORIGINS', 'http://localhost:8000,http://localhost:3000'
 ).split(',')
 
-INSTALLED_APPS = [
+# django-tenants
+TENANT_MODEL = 'company.Company'
+TENANT_DOMAIN_MODEL = 'company.Domain'
+
+SHARED_APPS = [
+    'django_tenants',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'account.apps.AccountConfig',
+    'company.apps.CompanyConfig',
+]
+
+TENANT_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'staff.apps.StaffConfig',
+    'patient.apps.PatientConfig',
+    'treatment.apps.TreatmentConfig',
+    'service.apps.ServiceConfig',
+    'pricelist.apps.PricelistConfig',
     'dicom.apps.DicomConfig',
 ]
 
+INSTALLED_APPS = list(SHARED_APPS) + [
+    app for app in TENANT_APPS if app not in SHARED_APPS
+]
+
 MIDDLEWARE = [
+    'django_tenants.middleware.main.TenantMainMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -55,7 +78,7 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
+        'ENGINE': 'django_tenants.postgresql_backend',
         'NAME': os.environ.get('POSTGRES_DB', 'db'),
         'USER': os.environ.get('POSTGRES_USER', 'customsmile'),
         'PASSWORD': os.environ.get('POSTGRES_PASSWORD', ''),
@@ -63,6 +86,8 @@ DATABASES = {
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
     }
 }
+
+DATABASE_ROUTERS = ['django_tenants.routers.TenantSyncRouter']
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -85,6 +110,8 @@ MEDIA_ROOT = BASE_DIR / 'media'
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+AUTH_USER_MODEL = 'account.User'
 
 # Services
 ORTHANC_URL = os.environ.get('ORTHANC_URL', 'http://orthanc:8042')
