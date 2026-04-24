@@ -7,7 +7,7 @@ class Service(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     stage = models.ForeignKey(
         "treatment.Stage",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="services",
         verbose_name="Этап",
     )

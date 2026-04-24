@@ -1,0 +1,1283 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ scan.patient }} — STL Viewer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #fff; overflow: hidden; }
+
+        .header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 16px; background: #16213e; gap: 16px; z-index: 20; position: relative;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .header h1 { font-size: 15px; font-weight: 500; }
+        .header .meta { font-size: 12px; color: #888; }
+        .header a { color: #4fc3f7; text-decoration: none; font-size: 13px; white-space: nowrap; }
+
+        .toolbar {
+            display: flex; align-items: center; gap: 2px;
+            padding: 4px 8px; background: #0f3460; z-index: 20; position: relative;
+            border-bottom: 1px solid #2a2a4a; flex-wrap: wrap;
+        }
+        .toolbar .sep { width: 1px; height: 24px; background: #2a2a4a; margin: 0 6px; }
+        .toolbar button {
+            padding: 5px 10px; border: 1px solid #2a2a4a; background: #16213e; color: #ccc;
+            border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap;
+            transition: all 0.15s;
+        }
+        .toolbar button:hover { background: #1a3a6e; color: #fff; }
+        .toolbar button.active { background: #4fc3f7; color: #000; border-color: #4fc3f7; }
+        .toolbar .lbl { font-size: 10px; color: #666; text-transform: uppercase; margin-right: 4px; }
+
+        .sidebar {
+            position: fixed; left: 0; top: 74px; bottom: 0; width: 220px;
+            background: #16213e; border-right: 1px solid #2a2a4a;
+            padding: 12px; overflow-y: auto; z-index: 10;
+        }
+        .sidebar h3 { font-size: 11px; text-transform: uppercase; color: #666; margin: 12px 0 6px; }
+        .sidebar h3:first-child { margin-top: 0; }
+        .sidebar label {
+            display: flex; align-items: center; gap: 8px;
+            padding: 4px; font-size: 12px; cursor: pointer; border-radius: 3px;
+        }
+        .sidebar label:hover { background: #1a1a3e; }
+        .sidebar input[type="checkbox"] { accent-color: #4fc3f7; }
+        .color-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+        .clip-controls { margin-top: 8px; display: none; }
+        .clip-controls.visible { display: block; }
+        .clip-controls label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; cursor: default; padding: 0; }
+        .clip-controls input[type="range"] { width: 100%; accent-color: #4fc3f7; }
+        .clip-controls select {
+            width: 100%; padding: 4px; background: #0f3460; color: #ccc;
+            border: 1px solid #2a2a4a; border-radius: 3px; font-size: 12px; margin-bottom: 6px;
+        }
+
+        #canvas-container { position: fixed; left: 220px; top: 74px; right: 0; bottom: 0; }
+        .loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 14px; color: #888; }
+
+        .measure-label {
+            position: absolute; background: rgba(0,0,0,0.8); color: #4fc3f7;
+            padding: 2px 6px; border-radius: 3px; font-size: 11px; pointer-events: none;
+            white-space: nowrap; border: 1px solid #4fc3f7;
+        }
+        .annotation-label {
+            position: absolute; background: rgba(255,165,0,0.9); color: #000;
+            padding: 2px 8px; border-radius: 3px; font-size: 11px; pointer-events: auto;
+            cursor: pointer; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+        }
+        .annotation-label:hover { background: #ffa726; }
+        .annotation-label .del { margin-left: 6px; color: #c00; font-weight: bold; cursor: pointer; }
+
+        .legend {
+            position: fixed; right: 20px; bottom: 20px; background: rgba(0,0,0,0.85);
+            padding: 10px 14px; border-radius: 6px; font-size: 11px; display: none; z-index: 15;
+        }
+        .legend.visible { display: block; }
+        .legend .gradient {
+            width: 20px; height: 120px;
+            background: linear-gradient(to top, #ff0000, #ffff00, #00ff00, #00aaff, #0000ff);
+            border-radius: 2px; margin: 4px 0;
+        }
+        .legend .labels { display: flex; flex-direction: column; justify-content: space-between; height: 120px; margin-left: 8px; }
+        .legend .row { display: flex; align-items: flex-start; }
+
+        /* Segmentation */
+        .seg-panel { margin-top: 8px; display: none; }
+        .seg-panel.visible { display: block; }
+        .seg-panel h3 { margin-bottom: 6px; }
+        .seg-palette { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; margin-bottom: 8px; }
+        .seg-tooth {
+            padding: 3px 2px; border: 2px solid transparent; border-radius: 3px;
+            font-size: 10px; text-align: center; cursor: pointer; color: #fff;
+            transition: border-color 0.15s;
+        }
+        .seg-tooth:hover { border-color: #fff; }
+        .seg-tooth.active { border-color: #4fc3f7; box-shadow: 0 0 6px #4fc3f7; }
+        .seg-brush-size { width: 100%; accent-color: #4fc3f7; }
+        .seg-actions { display: flex; gap: 4px; margin-top: 6px; }
+        .seg-actions button {
+            flex: 1; padding: 5px 4px; border: 1px solid #2a2a4a; background: #16213e;
+            color: #ccc; border-radius: 3px; cursor: pointer; font-size: 11px;
+        }
+        .seg-actions button:hover { background: #1a3a6e; color: #fff; }
+        .seg-actions button.save-btn { background: #1b5e20; border-color: #2e7d32; }
+        .seg-actions button.save-btn:hover { background: #2e7d32; }
+
+        .seg-file-select {
+            width: 100%; padding: 4px; background: #0f3460; color: #ccc;
+            border: 1px solid #2a2a4a; border-radius: 3px; font-size: 12px; margin-bottom: 6px;
+        }
+
+        .compare-popover {
+            position: absolute; top: 100%; right: 0; background: #16213e; border: 1px solid #2a2a4a;
+            border-radius: 4px; padding: 8px; z-index: 30; min-width: 250px; display: none;
+        }
+        .compare-popover.visible { display: block; }
+        .compare-popover a {
+            display: block; padding: 6px 8px; color: #ccc; text-decoration: none; font-size: 12px; border-radius: 3px;
+        }
+        .compare-popover a:hover { background: #0f3460; color: #fff; }
+        .compare-popover .empty { color: #666; font-size: 12px; padding: 6px 8px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>{{ scan.patient }}</h1>
+            <span class="meta">{{ scan.description }} &mdash; {{ scan.uploaded_at|date:"d.m.Y H:i" }}</span>
+        </div>
+        <a href="/admin/stl/stlscan/">&#8592; Назад</a>
+    </div>
+
+    <div class="toolbar" id="toolbar">
+        <span class="lbl">Вид:</span>
+        <button data-view="front">Спереди</button>
+        <button data-view="back">Сзади</button>
+        <button data-view="left">Слева</button>
+        <button data-view="right">Справа</button>
+        <button data-view="top">Сверху</button>
+        <button data-view="bottom">Снизу</button>
+
+        <div class="sep"></div>
+        <span class="lbl">Челюсть:</span>
+        <button data-jaw="upper" class="active">Верхняя</button>
+        <button data-jaw="lower" class="active">Нижняя</button>
+        <button data-jaw="buccal" class="active">Буккальный</button>
+
+        <div class="sep"></div>
+        <span class="lbl">Инструменты:</span>
+        <button data-tool="measure">Измерение</button>
+        <button data-tool="clip">Сечение</button>
+        <button data-tool="occlusion">Окклюзия</button>
+        <button data-tool="annotate">Аннотация</button>
+        <button data-tool="segment">Сегментация</button>
+        <button id="btn-screenshot">Скриншот</button>
+
+        <div class="sep"></div>
+        <div style="position:relative">
+            <button id="btn-compare">Сравнить</button>
+            <div class="compare-popover" id="compare-popover"></div>
+        </div>
+    </div>
+
+    <div class="sidebar">
+        <h3>Файлы</h3>
+        {% for f in files %}
+        <label>
+            <input type="checkbox" checked class="file-cb"
+                   data-url="{{ f.file.url }}"
+                   data-id="{{ f.id }}"
+                   data-category="{{ f.category }}">
+            <span class="color-dot" id="dot-{{ f.id }}"></span>
+            {{ f.name }}
+        </label>
+        {% endfor %}
+
+        <div class="seg-panel" id="seg-panel">
+            <h3>Сегментация</h3>
+            <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;cursor:default;padding:0">Файл:</label>
+            <select class="seg-file-select" id="seg-file-select"></select>
+            <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;cursor:default;padding:0">Верхняя челюсть (1x-2x):</label>
+            <div class="seg-palette" id="seg-palette-upper"></div>
+            <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;cursor:default;padding:0">Нижняя челюсть (3x-4x):</label>
+            <div class="seg-palette" id="seg-palette-lower"></div>
+            <div class="seg-palette" style="grid-template-columns: 1fr 1fr; margin-top:4px;">
+                <div class="seg-tooth" id="seg-gingiva" style="background:#e8a0bf">Десна</div>
+                <div class="seg-tooth" id="seg-eraser" style="background:#555">Ластик</div>
+            </div>
+            <label style="display:block;font-size:11px;color:#888;margin-top:8px;cursor:default;padding:0">
+                Размер кисти: <span id="seg-brush-val">3</span>мм
+            </label>
+            <input type="range" class="seg-brush-size" id="seg-brush-size" min="0.5" max="15" value="3" step="0.5">
+            <div class="seg-actions">
+                <button id="seg-save" class="save-btn">Сохранить</button>
+                <button id="seg-clear">Очистить</button>
+            </div>
+            <div style="margin-top:8px;padding-top:8px;border-top:1px solid #2a2a4a">
+                <label style="display:block;font-size:11px;color:#888;margin-bottom:4px;cursor:default;padding:0">ML автосегментация:</label>
+                <div class="seg-actions">
+                    <button id="seg-auto">Запустить AI</button>
+                </div>
+                <div id="seg-auto-status" style="font-size:11px;color:#888;margin-top:4px;display:none"></div>
+            </div>
+        </div>
+
+        <div class="clip-controls" id="clip-controls">
+            <h3>Сечение</h3>
+            <label>Ось:</label>
+            <select id="clip-axis">
+                <option value="y">Вертикаль (Y)</option>
+                <option value="x">Горизонталь (X)</option>
+                <option value="z">Глубина (Z)</option>
+            </select>
+            <label>Положение: <span id="clip-value">0</span></label>
+            <input type="range" id="clip-slider" min="-100" max="100" value="0" step="0.5">
+            <label style="margin-top:6px">
+                <input type="checkbox" id="clip-flip"> Обратное направление
+            </label>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <div class="loading" id="loading">Загрузка моделей...</div>
+    </div>
+
+    <div id="labels-container"></div>
+
+    <div class="legend" id="occlusion-legend">
+        <div style="font-weight:500;margin-bottom:4px">Окклюзионная карта</div>
+        <div class="row">
+            <div class="gradient"></div>
+            <div class="labels">
+                <span>&ge; 3 мм</span>
+                <span>2 мм</span>
+                <span>1 мм</span>
+                <span>0.5 мм</span>
+                <span>0 мм</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        /* ── Config ── */
+        const COLORS = [0x4fc3f7, 0xef5350, 0x66bb6a, 0xffa726, 0xab47bc, 0x26c6da, 0xec407a, 0x78909c];
+        const SCAN_PK = '{{ scan.pk }}';
+        const CSRF = '{{ csrf_token }}';
+
+        /* ── DOM refs ── */
+        const $ = id => document.getElementById(id);
+        const container = $('canvas-container');
+        const labelsEl = $('labels-container');
+
+        /* ── Scene ── */
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 10000);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.localClippingEnabled = true;
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.1;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dl1 = new THREE.DirectionalLight(0xffffff, 0.8);
+        dl1.position.set(1, 1, 1);
+        scene.add(dl1);
+        const dl2 = new THREE.DirectionalLight(0xffffff, 0.4);
+        dl2.position.set(-1, -0.5, -1);
+        scene.add(dl2);
+
+        /* ── State ── */
+        const meshes = {};
+        const meshCats = {};
+        const origMats = {};
+        let sceneCenter = new THREE.Vector3();
+        let sceneSize = 0;
+
+        let activeTool = null;
+        const measureData = { pts: [], markers: [], lines: [], labels: [] };
+        let occlusionOn = false;
+        let mouseDownPos = null;
+
+        const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+        const annotations = [];
+
+        /* ── Helpers ── */
+        function computeBounds() {
+            const box = new THREE.Box3();
+            scene.traverse(c => { if (c.isMesh && c.visible) box.expandByObject(c); });
+            if (box.isEmpty()) return;
+            sceneCenter = box.getCenter(new THREE.Vector3());
+            sceneSize = box.getSize(new THREE.Vector3()).length();
+        }
+
+        function fitCamera() {
+            computeBounds();
+            if (!sceneSize) return;
+            const d = sceneSize * 0.8;
+            camera.position.set(sceneCenter.x, sceneCenter.y, sceneCenter.z + d);
+            controls.target.copy(sceneCenter);
+            camera.near = sceneSize * 0.001;
+            camera.far = sceneSize * 10;
+            camera.updateProjectionMatrix();
+            controls.update();
+        }
+
+        /* ── Load files ── */
+        const loader = new STLLoader();
+        const checkboxes = document.querySelectorAll('.file-cb');
+        let loadedCount = 0;
+        const totalFiles = checkboxes.length;
+
+        function loadFile(url, fileId, category, ci) {
+            loader.load(url, geom => {
+                geom.computeVertexNormals();
+                const mat = new THREE.MeshPhongMaterial({
+                    color: COLORS[ci % COLORS.length],
+                    specular: 0x222222, shininess: 50,
+                    clippingPlanes: [], side: THREE.DoubleSide,
+                });
+                const mesh = new THREE.Mesh(geom, mat);
+                meshes[fileId] = mesh;
+                meshCats[fileId] = category;
+                origMats[fileId] = mat;
+                scene.add(mesh);
+
+                const dot = $('dot-' + fileId);
+                if (dot) dot.style.background = '#' + COLORS[ci % COLORS.length].toString(16).padStart(6, '0');
+
+                loadedCount++;
+                if (loadedCount >= totalFiles) {
+                    $('loading').style.display = 'none';
+                    fitCamera();
+                    updateClipBounds();
+                    loadAnnotations();
+                }
+            });
+        }
+
+        checkboxes.forEach((cb, i) => {
+            loadFile(cb.dataset.url, cb.dataset.id, cb.dataset.category, i);
+            cb.addEventListener('change', () => {
+                const m = meshes[cb.dataset.id];
+                if (m) m.visible = cb.checked;
+            });
+        });
+
+        if (totalFiles === 0) $('loading').textContent = 'Нет STL файлов';
+
+        /* ═══════════════════════════════════════════
+           1. Standard views
+           ═══════════════════════════════════════════ */
+        function setView(view) {
+            computeBounds();
+            if (!sceneSize) return;
+            const d = sceneSize * 0.8;
+            const c = sceneCenter;
+            const pos = {
+                front:  [c.x, c.y, c.z + d],
+                back:   [c.x, c.y, c.z - d],
+                left:   [c.x - d, c.y, c.z],
+                right:  [c.x + d, c.y, c.z],
+                top:    [c.x, c.y + d, c.z],
+                bottom: [c.x, c.y - d, c.z],
+            }[view];
+            if (!pos) return;
+            camera.position.set(...pos);
+            controls.target.copy(c);
+            if (view === 'top') camera.up.set(0, 0, -1);
+            else if (view === 'bottom') camera.up.set(0, 0, 1);
+            else camera.up.set(0, 1, 0);
+            camera.lookAt(c);
+            controls.update();
+        }
+
+        document.querySelectorAll('[data-view]').forEach(btn => {
+            btn.addEventListener('click', () => setView(btn.dataset.view));
+        });
+
+        /* ═══════════════════════════════════════════
+           2. Jaw toggle
+           ═══════════════════════════════════════════ */
+        document.querySelectorAll('[data-jaw]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const cat = btn.dataset.jaw;
+                const active = btn.classList.toggle('active');
+                Object.keys(meshes).forEach(id => {
+                    if (meshCats[id] === cat) {
+                        meshes[id].visible = active;
+                        const cb = document.querySelector(`.file-cb[data-id="${id}"]`);
+                        if (cb) cb.checked = active;
+                    }
+                });
+            });
+        });
+
+        /* ═══════════════════════════════════════════
+           3. Measurement
+           ═══════════════════════════════════════════ */
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function getHit(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            return raycaster.intersectObjects(Object.values(meshes).filter(m => m.visible), false);
+        }
+
+        function addMeasurePoint(pt) {
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(sceneSize * 0.005, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0xff4444, depthTest: false })
+            );
+            sphere.position.copy(pt);
+            sphere.renderOrder = 999;
+            scene.add(sphere);
+            measureData.pts.push(pt.clone());
+            measureData.markers.push(sphere);
+
+            if (measureData.pts.length === 2) {
+                const [p1, p2] = measureData.pts;
+                const dist = p1.distanceTo(p2);
+
+                const lineGeom = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+                const line = new THREE.Line(lineGeom, new THREE.LineBasicMaterial({ color: 0xff4444, depthTest: false }));
+                line.renderOrder = 999;
+                scene.add(line);
+                measureData.lines.push(line);
+
+                const lbl = document.createElement('div');
+                lbl.className = 'measure-label';
+                lbl.textContent = dist.toFixed(2) + ' мм';
+                lbl._worldPos = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+                labelsEl.appendChild(lbl);
+                measureData.labels.push(lbl);
+
+                measureData.pts = [];
+            }
+        }
+
+        function clearMeasurements() {
+            measureData.markers.forEach(m => scene.remove(m));
+            measureData.lines.forEach(l => scene.remove(l));
+            measureData.labels.forEach(l => l.remove());
+            measureData.pts = []; measureData.markers = []; measureData.lines = []; measureData.labels = [];
+        }
+
+        /* ═══════════════════════════════════════════
+           4. Clipping plane
+           ═══════════════════════════════════════════ */
+        const clipSlider = $('clip-slider');
+        const clipAxis = $('clip-axis');
+        const clipFlip = $('clip-flip');
+        const clipValue = $('clip-value');
+
+        function updateClipBounds() {
+            computeBounds();
+            if (!sceneSize) return;
+            const size = new THREE.Vector3();
+            const box = new THREE.Box3();
+            scene.traverse(c => { if (c.isMesh) box.expandByObject(c); });
+            box.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            clipSlider.min = -maxDim * 0.6;
+            clipSlider.max = maxDim * 0.6;
+            clipSlider.value = 0;
+        }
+
+        function updateClipPlane() {
+            const axis = clipAxis.value;
+            const val = parseFloat(clipSlider.value);
+            const flip = clipFlip.checked;
+            clipValue.textContent = val.toFixed(1);
+
+            const n = new THREE.Vector3();
+            if (axis === 'x') n.set(flip ? 1 : -1, 0, 0);
+            else if (axis === 'y') n.set(0, flip ? 1 : -1, 0);
+            else n.set(0, 0, flip ? 1 : -1);
+
+            clipPlane.normal.copy(n);
+            clipPlane.constant = val;
+        }
+
+        clipSlider.addEventListener('input', updateClipPlane);
+        clipAxis.addEventListener('change', updateClipPlane);
+        clipFlip.addEventListener('change', updateClipPlane);
+
+        function setClipping(on) {
+            const planes = on ? [clipPlane] : [];
+            Object.values(meshes).forEach(m => { m.material.clippingPlanes = planes; });
+            $('clip-controls').classList.toggle('visible', on);
+        }
+
+        /* ═══════════════════════════════════════════
+           5. Occlusion map (spatial grid + Web Worker)
+           ═══════════════════════════════════════════ */
+        let occlusionWorker = null;
+        let occlusionPending = 0;
+
+        // Web Worker code as blob URL
+        const workerCode = `
+            self.onmessage = function(e) {
+                const { srcPositions, targetPositions, maxDist, meshId } = e.data;
+                const srcCount = srcPositions.length / 3;
+                const targetCount = targetPositions.length / 3;
+
+                // Build spatial grid from target vertices
+                const cellSize = maxDist * 0.5;
+                const invCell = 1.0 / cellSize;
+                const grid = new Map();
+
+                for (let i = 0; i < targetCount; i++) {
+                    const x = targetPositions[i * 3];
+                    const y = targetPositions[i * 3 + 1];
+                    const z = targetPositions[i * 3 + 2];
+                    const cx = Math.floor(x * invCell);
+                    const cy = Math.floor(y * invCell);
+                    const cz = Math.floor(z * invCell);
+                    const key = cx + ',' + cy + ',' + cz;
+                    if (!grid.has(key)) grid.set(key, []);
+                    grid.get(key).push(i);
+                }
+
+                // For each source vertex, find nearest target vertex via grid
+                const dists = new Float32Array(srcCount);
+                const maxDistSq = maxDist * maxDist;
+
+                for (let i = 0; i < srcCount; i++) {
+                    const sx = srcPositions[i * 3];
+                    const sy = srcPositions[i * 3 + 1];
+                    const sz = srcPositions[i * 3 + 2];
+                    const cx = Math.floor(sx * invCell);
+                    const cy = Math.floor(sy * invCell);
+                    const cz = Math.floor(sz * invCell);
+
+                    let minDistSq = maxDistSq;
+                    // Search 3x3x3 neighborhood
+                    for (let dx = -1; dx <= 1; dx++) {
+                        for (let dy = -1; dy <= 1; dy++) {
+                            for (let dz = -1; dz <= 1; dz++) {
+                                const key = (cx+dx) + ',' + (cy+dy) + ',' + (cz+dz);
+                                const cell = grid.get(key);
+                                if (!cell) continue;
+                                for (let j = 0; j < cell.length; j++) {
+                                    const ti = cell[j];
+                                    const ddx = sx - targetPositions[ti * 3];
+                                    const ddy = sy - targetPositions[ti * 3 + 1];
+                                    const ddz = sz - targetPositions[ti * 3 + 2];
+                                    const dsq = ddx*ddx + ddy*ddy + ddz*ddz;
+                                    if (dsq < minDistSq) minDistSq = dsq;
+                                }
+                            }
+                        }
+                    }
+                    dists[i] = Math.sqrt(minDistSq);
+                }
+
+                self.postMessage({ dists, meshId }, [dists.buffer]);
+            };
+        `;
+        const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(workerBlob);
+
+        function toggleOcclusion() {
+            occlusionOn = !occlusionOn;
+            document.querySelector('[data-tool="occlusion"]').classList.toggle('active', occlusionOn);
+            $('occlusion-legend').classList.toggle('visible', occlusionOn);
+
+            if (occlusionOn) {
+                computeOcclusionMap();
+            } else {
+                if (occlusionWorker) { occlusionWorker.terminate(); occlusionWorker = null; }
+                Object.keys(meshes).forEach(id => {
+                    meshes[id].material = origMats[id];
+                    meshes[id].geometry.deleteAttribute('color');
+                });
+                $('loading').style.display = 'none';
+            }
+        }
+
+        function extractWorldPositions(meshList) {
+            // Collect all vertex positions in world space from a list of meshes
+            let totalCount = 0;
+            for (const m of meshList) totalCount += m.geometry.attributes.position.count;
+            const arr = new Float32Array(totalCount * 3);
+            let offset = 0;
+            const v = new THREE.Vector3();
+            for (const m of meshList) {
+                const pos = m.geometry.attributes.position;
+                for (let i = 0; i < pos.count; i++) {
+                    v.fromBufferAttribute(pos, i);
+                    m.localToWorld(v);
+                    arr[offset++] = v.x;
+                    arr[offset++] = v.y;
+                    arr[offset++] = v.z;
+                }
+            }
+            return arr;
+        }
+
+        function computeOcclusionMap() {
+            const upperIds = [], lowerIds = [];
+            Object.keys(meshes).forEach(id => {
+                if (!meshes[id].visible) return;
+                if (meshCats[id] === 'upper') upperIds.push(id);
+                if (meshCats[id] === 'lower') lowerIds.push(id);
+            });
+            if (!upperIds.length || !lowerIds.length) {
+                alert('Нужны файлы верхней и нижней челюсти');
+                occlusionOn = false;
+                document.querySelector('[data-tool="occlusion"]').classList.remove('active');
+                $('occlusion-legend').classList.remove('visible');
+                return;
+            }
+
+            $('loading').textContent = 'Вычисление окклюзии...';
+            $('loading').style.display = '';
+
+            const upperMeshes = upperIds.map(id => meshes[id]);
+            const lowerMeshes = lowerIds.map(id => meshes[id]);
+            const upperPositions = extractWorldPositions(upperMeshes);
+            const lowerPositions = extractWorldPositions(lowerMeshes);
+
+            occlusionWorker = new Worker(workerUrl);
+            occlusionPending = 0;
+            const allJobs = [];
+
+            // Queue jobs: each mesh colored by distance to the opposite jaw
+            for (const id of upperIds) {
+                allJobs.push({ id, mesh: meshes[id], targetPositions: lowerPositions });
+            }
+            for (const id of lowerIds) {
+                allJobs.push({ id, mesh: meshes[id], targetPositions: upperPositions });
+            }
+
+            occlusionPending = allJobs.length;
+            let jobIdx = 0;
+
+            occlusionWorker.onmessage = function(e) {
+                const { dists, meshId } = e.data;
+                applyOcclusionColors(meshId, dists, 3.0);
+                occlusionPending--;
+                if (occlusionPending <= 0) {
+                    $('loading').style.display = 'none';
+                    occlusionWorker.terminate();
+                    occlusionWorker = null;
+                } else {
+                    sendNextJob();
+                }
+            };
+
+            function sendNextJob() {
+                if (jobIdx >= allJobs.length) return;
+                const job = allJobs[jobIdx++];
+                const pos = job.mesh.geometry.attributes.position;
+                const srcPositions = new Float32Array(pos.count * 3);
+                const v = new THREE.Vector3();
+                for (let i = 0; i < pos.count; i++) {
+                    v.fromBufferAttribute(pos, i);
+                    job.mesh.localToWorld(v);
+                    srcPositions[i*3] = v.x; srcPositions[i*3+1] = v.y; srcPositions[i*3+2] = v.z;
+                }
+                occlusionWorker.postMessage(
+                    { srcPositions, targetPositions: job.targetPositions, maxDist: 3.0, meshId: job.id },
+                    [srcPositions.buffer]
+                );
+            }
+
+            sendNextJob();
+        }
+
+        function applyOcclusionColors(meshId, dists, maxDist) {
+            const mesh = meshes[meshId];
+            if (!mesh) return;
+            const count = dists.length;
+            const colors = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                const t = Math.min(dists[i] / maxDist, 1.0);
+                const c = heatColor(t);
+                colors[i*3] = c[0]; colors[i*3+1] = c[1]; colors[i*3+2] = c[2];
+            }
+            mesh.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            mesh.material = new THREE.MeshPhongMaterial({
+                vertexColors: true, specular: 0x111111, shininess: 30,
+                clippingPlanes: mesh.material.clippingPlanes, side: THREE.DoubleSide,
+            });
+        }
+
+        function heatColor(t) {
+            // Returns [r, g, b] 0..1.  0=red(contact) → 0.33=green → 1=blue(far)
+            if (t < 0.17) return [1, t / 0.17, 0];
+            if (t < 0.33) return [1 - (t - 0.17) / 0.16, 1, 0];
+            if (t < 0.67) return [0, 1 - (t - 0.33) / 0.34, (t - 0.33) / 0.34];
+            return [0, 0, 1];
+        }
+
+        /* ═══════════════════════════════════════════
+           6. Annotations
+           ═══════════════════════════════════════════ */
+        function loadAnnotations() {
+            fetch('/stl/api/' + SCAN_PK + '/annotations/')
+                .then(r => r.json())
+                .then(data => { (data.annotations || []).forEach(addAnnotation); });
+        }
+
+        function addAnnotation(data) {
+            const pos = new THREE.Vector3(data.x, data.y, data.z);
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(sceneSize * 0.004, 12, 12),
+                new THREE.MeshBasicMaterial({ color: 0xffa726, depthTest: false })
+            );
+            sphere.position.copy(pos);
+            sphere.renderOrder = 999;
+            scene.add(sphere);
+
+            const lbl = document.createElement('div');
+            lbl.className = 'annotation-label';
+            lbl.innerHTML = escapeHtml(data.text) + ' <span class="del" data-ann-id="' + data.id + '">&times;</span>';
+            lbl._worldPos = pos;
+            lbl.querySelector('.del').addEventListener('click', e => {
+                e.stopPropagation();
+                deleteAnnotation(data.id, sphere, lbl);
+            });
+            labelsEl.appendChild(lbl);
+            annotations.push({ id: data.id, marker: sphere, labelEl: lbl });
+        }
+
+        function escapeHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function createAnnotation(pt) {
+            const text = prompt('Введите заметку:');
+            if (!text || !text.trim()) return;
+            fetch('/stl/api/' + SCAN_PK + '/annotations/create/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                body: JSON.stringify({ x: pt.x, y: pt.y, z: pt.z, text: text.trim() }),
+            })
+            .then(r => r.json())
+            .then(data => { if (data.id) addAnnotation(data); });
+        }
+
+        function deleteAnnotation(id, marker, lbl) {
+            fetch('/stl/api/annotations/' + id + '/delete/', {
+                method: 'DELETE', headers: { 'X-CSRFToken': CSRF },
+            })
+            .then(r => r.json())
+            .then(() => {
+                scene.remove(marker);
+                lbl.remove();
+                const idx = annotations.findIndex(a => a.id === id);
+                if (idx >= 0) annotations.splice(idx, 1);
+            });
+        }
+
+        /* ═══════════════════════════════════════════
+           7. Segmentation
+           ═══════════════════════════════════════════ */
+        const TOOTH_COLORS = {
+            // Upper right (1x) — blues/teals
+            tooth_11: '#4fc3f7', tooth_12: '#29b6f6', tooth_13: '#03a9f4', tooth_14: '#039be5',
+            tooth_15: '#0288d1', tooth_16: '#0277bd', tooth_17: '#01579b', tooth_18: '#014f8a',
+            // Upper left (2x) — greens
+            tooth_21: '#66bb6a', tooth_22: '#4caf50', tooth_23: '#43a047', tooth_24: '#388e3c',
+            tooth_25: '#2e7d32', tooth_26: '#1b5e20', tooth_27: '#155d1a', tooth_28: '#0d4f14',
+            // Lower left (3x) — oranges/yellows
+            tooth_31: '#ffa726', tooth_32: '#ff9800', tooth_33: '#fb8c00', tooth_34: '#f57c00',
+            tooth_35: '#ef6c00', tooth_36: '#e65100', tooth_37: '#d84315', tooth_38: '#bf360c',
+            // Lower right (4x) — purples/pinks
+            tooth_41: '#ab47bc', tooth_42: '#9c27b0', tooth_43: '#8e24aa', tooth_44: '#7b1fa2',
+            tooth_45: '#6a1b9a', tooth_46: '#4a148c', tooth_47: '#7c4dff', tooth_48: '#651fff',
+            gingiva: '#e8a0bf',
+        };
+
+        const segState = {
+            active: false,
+            selectedLabel: null,
+            brushSize: 3,
+            fileId: null,         // currently segmented file
+            faceLabels: {},       // { fileId: { faceIdx: 'tooth_11', ... } }
+            centroids: {},        // { fileId: Float32Array }
+            painting: false,
+            dirty: false,
+        };
+
+        // Build tooth palette
+        function buildPalette() {
+            const upperPal = $('seg-palette-upper');
+            const lowerPal = $('seg-palette-lower');
+            for (let q = 1; q <= 4; q++) {
+                for (let t = 1; t <= 8; t++) {
+                    const num = q * 10 + t;
+                    const key = 'tooth_' + num;
+                    const div = document.createElement('div');
+                    div.className = 'seg-tooth';
+                    div.style.background = TOOTH_COLORS[key];
+                    div.textContent = num;
+                    div.dataset.label = key;
+                    div.addEventListener('click', () => selectSegLabel(key, div));
+                    if (q <= 2) upperPal.appendChild(div);
+                    else lowerPal.appendChild(div);
+                }
+            }
+            $('seg-gingiva').addEventListener('click', () => selectSegLabel('gingiva', $('seg-gingiva')));
+            $('seg-eraser').addEventListener('click', () => selectSegLabel('__eraser__', $('seg-eraser')));
+        }
+        buildPalette();
+
+        function selectSegLabel(label, el) {
+            document.querySelectorAll('.seg-tooth').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
+            segState.selectedLabel = label;
+        }
+
+        // Build file select dropdown
+        function buildSegFileSelect() {
+            const sel = $('seg-file-select');
+            sel.innerHTML = '';
+            checkboxes.forEach(cb => {
+                const opt = document.createElement('option');
+                opt.value = cb.dataset.id;
+                opt.textContent = cb.parentElement.textContent.trim();
+                sel.appendChild(opt);
+            });
+            sel.addEventListener('change', () => switchSegFile(sel.value));
+        }
+        buildSegFileSelect();
+
+        // Precompute face centroids for a mesh
+        function computeCentroids(mesh) {
+            const pos = mesh.geometry.attributes.position;
+            const faceCount = Math.floor(pos.count / 3);
+            const centroids = new Float32Array(faceCount * 3);
+            for (let f = 0; f < faceCount; f++) {
+                const i = f * 3;
+                centroids[f * 3]     = (pos.getX(i) + pos.getX(i+1) + pos.getX(i+2)) / 3;
+                centroids[f * 3 + 1] = (pos.getY(i) + pos.getY(i+1) + pos.getY(i+2)) / 3;
+                centroids[f * 3 + 2] = (pos.getZ(i) + pos.getZ(i+1) + pos.getZ(i+2)) / 3;
+            }
+            return centroids;
+        }
+
+        function ensureCentroids(fileId) {
+            if (!segState.centroids[fileId]) {
+                const mesh = meshes[fileId];
+                if (mesh) segState.centroids[fileId] = computeCentroids(mesh);
+            }
+        }
+
+        function switchSegFile(fileId) {
+            segState.fileId = fileId;
+            ensureCentroids(fileId);
+            applySegColors(fileId);
+        }
+
+        // Ensure mesh has vertex color attribute
+        function ensureVertexColors(mesh) {
+            const geom = mesh.geometry;
+            if (!geom.attributes.color) {
+                const count = geom.attributes.position.count;
+                const colors = new Float32Array(count * 3);
+                // Initialize with original material color
+                const c = mesh.material.color || new THREE.Color(0xcccccc);
+                for (let i = 0; i < count; i++) {
+                    colors[i * 3] = c.r;
+                    colors[i * 3 + 1] = c.g;
+                    colors[i * 3 + 2] = c.b;
+                }
+                geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            }
+        }
+
+        // Apply segmentation colors to mesh
+        function applySegColors(fileId) {
+            const mesh = meshes[fileId];
+            if (!mesh) return;
+            const labels = segState.faceLabels[fileId] || {};
+            const geom = mesh.geometry;
+            const pos = geom.attributes.position;
+            const faceCount = Math.floor(pos.count / 3);
+
+            ensureVertexColors(mesh);
+            const colors = geom.attributes.color.array;
+            const origColor = origMats[fileId].color;
+
+            for (let f = 0; f < faceCount; f++) {
+                const label = labels[f];
+                let r, g, b;
+                if (label && TOOTH_COLORS[label]) {
+                    const c = new THREE.Color(TOOTH_COLORS[label]);
+                    r = c.r; g = c.g; b = c.b;
+                } else {
+                    r = origColor.r; g = origColor.g; b = origColor.b;
+                }
+                const vi = f * 3;
+                for (let v = 0; v < 3; v++) {
+                    colors[(vi + v) * 3]     = r;
+                    colors[(vi + v) * 3 + 1] = g;
+                    colors[(vi + v) * 3 + 2] = b;
+                }
+            }
+            geom.attributes.color.needsUpdate = true;
+
+            // Switch to vertex color material
+            if (!mesh.material.vertexColors) {
+                mesh.material = new THREE.MeshPhongMaterial({
+                    vertexColors: true, specular: 0x222222, shininess: 50,
+                    clippingPlanes: origMats[fileId].clippingPlanes,
+                    side: THREE.DoubleSide,
+                });
+            }
+        }
+
+        // Paint faces within brush radius around a point
+        function paintAtPoint(point, fileId) {
+            if (!segState.selectedLabel) return;
+            const mesh = meshes[fileId];
+            if (!mesh) return;
+            ensureCentroids(fileId);
+            const centroids = segState.centroids[fileId];
+            const faceCount = centroids.length / 3;
+            const r2 = segState.brushSize * segState.brushSize;
+
+            // Transform point to local space
+            const localPt = point.clone();
+            mesh.worldToLocal(localPt);
+
+            if (!segState.faceLabels[fileId]) segState.faceLabels[fileId] = {};
+            const labels = segState.faceLabels[fileId];
+            const isEraser = segState.selectedLabel === '__eraser__';
+
+            let changed = false;
+            for (let f = 0; f < faceCount; f++) {
+                const dx = centroids[f * 3]     - localPt.x;
+                const dy = centroids[f * 3 + 1] - localPt.y;
+                const dz = centroids[f * 3 + 2] - localPt.z;
+                if (dx*dx + dy*dy + dz*dz <= r2) {
+                    if (isEraser) {
+                        if (labels[f]) { delete labels[f]; changed = true; }
+                    } else {
+                        if (labels[f] !== segState.selectedLabel) {
+                            labels[f] = segState.selectedLabel;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if (changed) {
+                segState.dirty = true;
+                applySegColors(fileId);
+            }
+        }
+
+        // Segmentation mouse handlers
+        renderer.domElement.addEventListener('pointerdown', e => {
+            if (activeTool !== 'segment') return;
+            if (!segState.selectedLabel || !segState.fileId) return;
+            const hits = getHit(e);
+            const targetMesh = meshes[segState.fileId];
+            const hit = hits.find(h => h.object === targetMesh);
+            if (hit) {
+                segState.painting = true;
+                controls.enabled = false;  // disable orbit while painting
+                paintAtPoint(hit.point, segState.fileId);
+            }
+        });
+
+        renderer.domElement.addEventListener('pointermove', e => {
+            if (activeTool !== 'segment' || !segState.painting) return;
+            if (!segState.selectedLabel || !segState.fileId) return;
+            const hits = getHit(e);
+            const targetMesh = meshes[segState.fileId];
+            const hit = hits.find(h => h.object === targetMesh);
+            if (hit) paintAtPoint(hit.point, segState.fileId);
+        });
+
+        renderer.domElement.addEventListener('pointerup', () => {
+            if (segState.painting) {
+                segState.painting = false;
+                controls.enabled = true;  // re-enable orbit
+            }
+        });
+
+        // Brush size
+        $('seg-brush-size').addEventListener('input', e => {
+            segState.brushSize = parseFloat(e.target.value);
+            $('seg-brush-val').textContent = segState.brushSize;
+        });
+
+        // Save segmentation
+        $('seg-save').addEventListener('click', () => {
+            const fileId = segState.fileId;
+            if (!fileId) return;
+            const labels = segState.faceLabels[fileId] || {};
+            // Convert to { tooth_11: [0,1,2,...], ... } format
+            const grouped = {};
+            for (const [faceIdx, label] of Object.entries(labels)) {
+                if (!grouped[label]) grouped[label] = [];
+                grouped[label].push(parseInt(faceIdx));
+            }
+            fetch('/stl/api/files/' + fileId + '/segmentation/save/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                body: JSON.stringify({ labels: grouped }),
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.id) {
+                    segState.dirty = false;
+                    alert('Сегментация сохранена');
+                } else {
+                    alert('Ошибка: ' + (data.error || 'unknown'));
+                }
+            });
+        });
+
+        // Clear segmentation
+        $('seg-clear').addEventListener('click', () => {
+            const fileId = segState.fileId;
+            if (!fileId) return;
+            if (!confirm('Очистить сегментацию для этого файла?')) return;
+            segState.faceLabels[fileId] = {};
+            segState.dirty = true;
+            applySegColors(fileId);
+        });
+
+        // Auto-segmentation (ML)
+        $('seg-auto').addEventListener('click', () => {
+            const fileId = segState.fileId;
+            if (!fileId) return;
+            if (!confirm('Запустить AI-сегментацию? Это может занять 30-60 секунд.')) return;
+
+            const statusEl = $('seg-auto-status');
+            statusEl.style.display = '';
+            statusEl.textContent = 'Запуск...';
+
+            fetch('/stl/api/files/' + fileId + '/segmentation/auto/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': CSRF },
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.task_id) {
+                    statusEl.textContent = 'Обработка... (обновите через 30-60 сек)';
+                    // Poll for result
+                    let attempts = 0;
+                    const poll = setInterval(() => {
+                        attempts++;
+                        if (attempts > 60) {
+                            clearInterval(poll);
+                            statusEl.textContent = 'Таймаут. Попробуйте обновить страницу.';
+                            return;
+                        }
+                        fetch('/stl/api/files/' + fileId + '/segmentation/')
+                            .then(r => r.json())
+                            .then(seg => {
+                                if (seg.segmentation && seg.segmentation.source === 'auto') {
+                                    clearInterval(poll);
+                                    statusEl.textContent = 'Готово!';
+                                    loadSegmentation(fileId);
+                                    setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+                                }
+                            });
+                    }, 3000);
+                } else {
+                    statusEl.textContent = 'Ошибка: ' + (data.error || 'unknown');
+                }
+            })
+            .catch(err => {
+                statusEl.textContent = 'Ошибка: ' + err.message;
+            });
+        });
+
+        // Load segmentation from server
+        function loadSegmentation(fileId) {
+            fetch('/stl/api/files/' + fileId + '/segmentation/')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.segmentation || !data.segmentation.labels) return;
+                    // Convert from grouped { tooth_11: [0,1,2] } to flat { 0: tooth_11, 1: tooth_11 }
+                    const flat = {};
+                    for (const [label, indices] of Object.entries(data.segmentation.labels)) {
+                        for (const idx of indices) {
+                            flat[idx] = label;
+                        }
+                    }
+                    segState.faceLabels[fileId] = flat;
+                    if (segState.active && segState.fileId === fileId) {
+                        applySegColors(fileId);
+                    }
+                });
+        }
+
+        // Activate/deactivate segmentation
+        function setSegmentation(on) {
+            segState.active = on;
+            $('seg-panel').classList.toggle('visible', on);
+            if (on) {
+                controls.enabled = true;  // orbit still works
+                const firstFileId = $('seg-file-select').value;
+                if (firstFileId) {
+                    segState.fileId = firstFileId;
+                    ensureCentroids(firstFileId);
+                    loadSegmentation(firstFileId);
+                    applySegColors(firstFileId);
+                }
+            } else {
+                segState.painting = false;
+                // Restore original materials for all files
+                Object.keys(meshes).forEach(id => {
+                    if (meshes[id].material.vertexColors) {
+                        meshes[id].material = origMats[id];
+                        meshes[id].geometry.deleteAttribute('color');
+                    }
+                });
+            }
+        }
+
+        /* ═══════════════════════════════════════════
+           8. Screenshot
+           ═══════════════════════════════════════════ */
+        $('btn-screenshot').addEventListener('click', () => {
+            renderer.render(scene, camera);
+            const a = document.createElement('a');
+            a.download = 'stl_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.png';
+            a.href = renderer.domElement.toDataURL('image/png');
+            a.click();
+        });
+
+        /* ═══════════════════════════════════════════
+           Tool toggle
+           ═══════════════════════════════════════════ */
+        document.querySelectorAll('[data-tool]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tool = btn.dataset.tool;
+
+                // Occlusion is special — toggle mode, not a click-tool
+                if (tool === 'occlusion') { toggleOcclusion(); return; }
+
+                if (activeTool === tool) {
+                    // Deactivate
+                    activeTool = null;
+                    btn.classList.remove('active');
+                    if (tool === 'clip') setClipping(false);
+                    if (tool === 'measure') clearMeasurements();
+                    if (tool === 'segment') setSegmentation(false);
+                    renderer.domElement.style.cursor = 'default';
+                    return;
+                }
+
+                // Deactivate previous
+                if (activeTool) {
+                    const prev = document.querySelector(`[data-tool="${activeTool}"]`);
+                    if (prev) prev.classList.remove('active');
+                    if (activeTool === 'clip') setClipping(false);
+                    if (activeTool === 'segment') setSegmentation(false);
+                }
+
+                activeTool = tool;
+                btn.classList.add('active');
+                if (tool === 'clip') {
+                    setClipping(true);
+                    renderer.domElement.style.cursor = 'default';
+                } else if (tool === 'segment') {
+                    setSegmentation(true);
+                    renderer.domElement.style.cursor = 'crosshair';
+                } else {
+                    renderer.domElement.style.cursor = 'crosshair';
+                }
+            });
+        });
+
+        /* ── Click on canvas (measure / annotate) ── */
+        // Track mouse movement to distinguish click from drag
+        renderer.domElement.addEventListener('pointerdown', e => {
+            mouseDownPos = { x: e.clientX, y: e.clientY };
+        });
+
+        renderer.domElement.addEventListener('pointerup', e => {
+            if (!mouseDownPos) return;
+            const dx = e.clientX - mouseDownPos.x;
+            const dy = e.clientY - mouseDownPos.y;
+            mouseDownPos = null;
+            // If mouse moved more than 5px, it was a drag (orbit), not a click
+            if (Math.sqrt(dx * dx + dy * dy) > 5) return;
+            if (!activeTool || activeTool === 'clip' || activeTool === 'segment') return;
+
+            const hits = getHit(e);
+            if (!hits.length) return;
+            if (activeTool === 'measure') addMeasurePoint(hits[0].point);
+            else if (activeTool === 'annotate') createAnnotation(hits[0].point);
+        });
+
+        /* ── Compare popover ── */
+        const comparePop = $('compare-popover');
+        $('btn-compare').addEventListener('click', e => {
+            e.stopPropagation();
+            if (comparePop.classList.contains('visible')) {
+                comparePop.classList.remove('visible');
+                return;
+            }
+            comparePop.innerHTML = '<div class="empty">Загрузка...</div>';
+            comparePop.classList.add('visible');
+
+            fetch('/stl/api/' + SCAN_PK + '/patient-scans/')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.scans || !data.scans.length) {
+                        comparePop.innerHTML = '<div class="empty">Нет других снимков</div>';
+                        return;
+                    }
+                    comparePop.innerHTML = '';
+                    data.scans.forEach(s => {
+                        const a = document.createElement('a');
+                        const dt = new Date(s.uploaded_at).toLocaleDateString('ru-RU');
+                        a.href = '/stl/' + SCAN_PK + '/compare/' + s.id + '/';
+                        a.textContent = (s.description || 'STL снимок') + ' — ' + dt;
+                        comparePop.appendChild(a);
+                    });
+                });
+        });
+
+        document.addEventListener('click', e => {
+            if (!comparePop.contains(e.target) && e.target !== $('btn-compare')) {
+                comparePop.classList.remove('visible');
+            }
+        });
+
+        /* ── Label projection ── */
+        function projectLabels() {
+            const rect = renderer.domElement.getBoundingClientRect();
+            for (const lbl of labelsEl.children) {
+                if (!lbl._worldPos) continue;
+                const p = lbl._worldPos.clone().project(camera);
+                lbl.style.left = ((p.x * 0.5 + 0.5) * rect.width + rect.left) + 'px';
+                lbl.style.top  = ((-p.y * 0.5 + 0.5) * rect.height + rect.top - 20) + 'px';
+                lbl.style.display = p.z < 1 ? '' : 'none';
+            }
+        }
+
+        /* ── Resize ── */
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        /* ── Render loop ── */
+        (function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+            projectLabels();
+        })();
+    </script>
+</body>
+</html>

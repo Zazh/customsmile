@@ -8,6 +8,8 @@ import core.admin  # noqa: F401 — patches admin.site
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('dicom/', include('dicom.urls')),
+    path('stl/', include('stl.urls')),
+    path('smile/', include('smile.urls')),
 ]
 
 if settings.DEBUG:

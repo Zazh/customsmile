@@ -3,7 +3,12 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-dev-key')
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    if os.environ.get('DJANGO_DEBUG', '0') == '1':
+        SECRET_KEY = 'django-insecure-dev-key'
+    else:
+        raise RuntimeError("DJANGO_SECRET_KEY environment variable is required in production")
 
 DEBUG = os.environ.get('DJANGO_DEBUG', '0') == '1'
 
@@ -39,6 +44,8 @@ TENANT_APPS = [
     'service.apps.ServiceConfig',
     'pricelist.apps.PricelistConfig',
     'dicom.apps.DicomConfig',
+    'stl.apps.StlConfig',
+    'smile.apps.SmileConfig',
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [
@@ -112,6 +119,14 @@ X_FRAME_OPTIONS = 'SAMEORIGIN'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'account.User'
+
+# Chunked upload: allow 6MB per request (chunk size 5MB + overhead)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
+
+# Celery
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
 
 # Services
 ORTHANC_URL = os.environ.get('ORTHANC_URL', 'http://orthanc:8042')

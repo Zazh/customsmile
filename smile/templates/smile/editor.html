@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редактор улыбки — {{ analysis.photo.patient }}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #eee; }
+
+.toolbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; background: #16213e; border-bottom: 1px solid #0f3460;
+}
+.toolbar h1 { font-size: 16px; font-weight: 500; margin-right: auto; }
+.toolbar button {
+    padding: 6px 14px; border: 1px solid #0f3460; border-radius: 4px;
+    background: #0f3460; color: #eee; cursor: pointer; font-size: 13px;
+}
+.toolbar button:hover { background: #1a4a8a; }
+.toolbar button.active { background: #e94560; border-color: #e94560; }
+.toolbar button.save-btn { background: #2ecc71; border-color: #27ae60; }
+.toolbar button.save-btn:hover { background: #27ae60; }
+
+.toolbar .status {
+    font-size: 12px; padding: 4px 8px; border-radius: 3px;
+}
+.status-done { background: #2ecc71; color: #fff; }
+.status-processing { background: #f39c12; color: #fff; }
+.status-failed { background: #e74c3c; color: #fff; }
+.status-pending { background: #95a5a6; color: #fff; }
+
+.workspace {
+    display: flex; height: calc(100vh - 49px);
+}
+
+.canvas-container {
+    flex: 1; position: relative; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    background: #111;
+}
+
+canvas { cursor: crosshair; }
+
+.sidebar {
+    width: 260px; background: #16213e; border-left: 1px solid #0f3460;
+    padding: 12px; overflow-y: auto;
+}
+.sidebar h3 { font-size: 13px; margin-bottom: 8px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+.sidebar label {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px; font-size: 13px; cursor: pointer;
+}
+.sidebar input[type="checkbox"] { accent-color: #e94560; }
+.sidebar hr { border: none; border-top: 1px solid #0f3460; margin: 12px 0; }
+.sidebar .info { font-size: 12px; color: #888; margin-top: 8px; }
+
+.legend-color {
+    display: inline-block; width: 14px; height: 3px; border-radius: 1px;
+}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+    <h1>{{ analysis.photo.patient }} — Редактор улыбки</h1>
+    <span class="status status-{{ analysis.status }}">{{ analysis.get_status_display }}</span>
+    <button id="btn-mode-view" class="active" onclick="setMode('view')">Просмотр</button>
+    <button id="btn-mode-teeth" onclick="setMode('teeth')">Контур зубов</button>
+    <button id="btn-mode-lip" onclick="setMode('lip')">Контур губ</button>
+    <button id="btn-mode-guide" onclick="setMode('guide')">Направляющие</button>
+    <button id="btn-save" class="save-btn" onclick="saveAll()">Сохранить</button>
+    <button id="btn-regen" onclick="regenerate()">Пересоздать</button>
+</div>
+
+<div class="workspace">
+    <div class="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+    <div class="sidebar">
+        <h3>Слои</h3>
+        <label><input type="checkbox" id="show-photo" checked onchange="render()"><span>Фото</span></label>
+        <label><input type="checkbox" id="show-teeth" checked onchange="render()"><span class="legend-color" style="background:#00ffff"></span> Контур зубов</label>
+        <label><input type="checkbox" id="show-lip" checked onchange="render()"><span class="legend-color" style="background:#00c800"></span> Контур губ</label>
+        <label><input type="checkbox" id="show-guides" checked onchange="render()"><span class="legend-color" style="background:#ffff00"></span> Направляющие</label>
+        <label><input type="checkbox" id="show-points" checked onchange="render()"><span>Точки контура</span></label>
+
+        <hr>
+        <h3>Результаты</h3>
+        {% if analysis.contour_image %}
+        <label><a href="{{ analysis.contour_image.url }}" target="_blank" style="color:#5dade2">Контур (PNG)</a></label>
+        {% endif %}
+        {% if analysis.guidelines_image %}
+        <label><a href="{{ analysis.guidelines_image.url }}" target="_blank" style="color:#5dade2">Направляющие (PNG)</a></label>
+        {% endif %}
+        {% if analysis.cutout_image %}
+        <label><a href="{{ analysis.cutout_image.url }}" target="_blank" style="color:#5dade2">Вырезка улыбки (PNG)</a></label>
+        {% endif %}
+        {% if analysis.masked_image %}
+        <label><a href="{{ analysis.masked_image.url }}" target="_blank" style="color:#5dade2">Маска (PNG)</a></label>
+        {% endif %}
+
+        <hr>
+        <h3>Подсказки</h3>
+        <div class="info">
+            <p><b>Просмотр:</b> перемещение и зум</p>
+            <p><b>Контур:</b> перетаскивание точек мышью</p>
+            <p><b>Направляющие:</b> перетаскивание концов линий</p>
+            <p style="margin-top:8px">Колесо мыши — зум</p>
+            <p>После правок нажмите «Сохранить», затем «Пересоздать»</p>
+        </div>
+    </div>
+</div>
+
+<script>
+const ANALYSIS_ID = "{{ analysis.pk }}";
+const PHOTO_URL = "{{ analysis.photo.image.url }}";
+const CSRF_TOKEN = "{{ csrf_token }}";
+
+// Data from server
+let teethContour = {{ analysis.teeth_contour|safe }};
+let lipContour = {{ analysis.lip_contour|safe }};
+let guidelines = {{ analysis.guidelines|safe }};
+
+// Canvas state
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+let img = new Image();
+let imgLoaded = false;
+
+// View transform
+let scale = 1;
+let offsetX = 0, offsetY = 0;
+
+// Interaction
+let mode = "view";  // view | teeth | lip | guide
+let dragging = null;  // {type, index, subkey?}
+let panStart = null;
+const POINT_RADIUS = 6;
+const GRAB_RADIUS = 10;
+
+// ── Image loading ──
+
+img.onload = function() {
+    imgLoaded = true;
+    // Fit to container
+    const container = canvas.parentElement;
+    const sw = container.clientWidth / img.width;
+    const sh = container.clientHeight / img.height;
+    scale = Math.min(sw, sh, 1) * 0.95;
+    offsetX = (container.clientWidth - img.width * scale) / 2;
+    offsetY = (container.clientHeight - img.height * scale) / 2;
+    resizeCanvas();
+    render();
+};
+img.src = PHOTO_URL;
+
+function resizeCanvas() {
+    const container = canvas.parentElement;
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+}
+window.addEventListener("resize", () => { resizeCanvas(); render(); });
+
+// ── Coordinate transforms ──
+
+function toScreen(x, y) {
+    return [x * scale + offsetX, y * scale + offsetY];
+}
+
+function toImage(sx, sy) {
+    return [(sx - offsetX) / scale, (sy - offsetY) / scale];
+}
+
+// ── Rendering ──
+
+function render() {
+    if (!imgLoaded) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Photo
+    if (document.getElementById("show-photo").checked) {
+        ctx.drawImage(img, offsetX, offsetY, img.width * scale, img.height * scale);
+    }
+
+    const showPoints = document.getElementById("show-points").checked;
+
+    // Teeth contour — primary (cutout boundary)
+    if (document.getElementById("show-teeth").checked && teethContour.length > 0) {
+        drawPolygon(teethContour, "#00ffff", 2, showPoints && mode === "teeth");
+    }
+
+    // Lip contour — secondary reference
+    if (document.getElementById("show-lip").checked && lipContour.length > 0) {
+        drawPolygon(lipContour, "#00c800", 1, showPoints && mode === "lip");
+    }
+
+    // Guidelines
+    if (document.getElementById("show-guides").checked && guidelines) {
+        drawGuidelines(showPoints && mode === "guide");
+    }
+}
+
+function drawPolygon(points, color, lineWidth, showDots) {
+    if (points.length < 2) return;
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    const [sx, sy] = toScreen(points[0].x, points[0].y);
+    ctx.moveTo(sx, sy);
+    for (let i = 1; i < points.length; i++) {
+        const [px, py] = toScreen(points[i].x, points[i].y);
+        ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    if (showDots) {
+        points.forEach((p, i) => {
+            const [px, py] = toScreen(p.x, p.y);
+            ctx.beginPath();
+            ctx.arc(px, py, POINT_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        });
+    }
+}
+
+function drawGuidelines(showDots) {
+    // Facial midline — cyan dashed
+    const midline = guidelines.facial_midline;
+    if (midline) {
+        drawGuidelineLine(midline.start, midline.end, "#ffff00", [8, 4], showDots, "midline");
+    }
+
+    // Interpupillary — magenta dashed
+    const ipd = guidelines.interpupillary;
+    if (ipd) {
+        drawGuidelineLine(ipd.start, ipd.end, "#ff00ff", [6, 3], showDots, "interpupillary");
+    }
+
+    // Smile arc — yellow
+    const arc = guidelines.smile_arc;
+    if (arc && arc.length > 1) {
+        drawPolyline(arc, "#ffff00", 2, showDots);
+    }
+
+    // Upper lip line — green
+    const lip = guidelines.upper_lip_line;
+    if (lip && lip.length > 1) {
+        drawPolyline(lip, "#00cc00", 1, false);
+    }
+
+    // Buccal corridors — red boxes
+    const bc = guidelines.buccal_corridors;
+    if (bc) {
+        ["left", "right"].forEach(side => {
+            const info = bc[side];
+            if (!info) return;
+            const [sx, sy] = toScreen(info.x, info.y);
+            const sw = info.width * scale;
+            ctx.strokeStyle = "#ff0000";
+            ctx.lineWidth = 2;
+            if (side === "left") {
+                ctx.strokeRect(sx - sw, sy - 15 * scale, sw, 30 * scale);
+            } else {
+                ctx.strokeRect(sx, sy - 15 * scale, sw, 30 * scale);
+            }
+        });
+    }
+}
+
+function drawGuidelineLine(start, end, color, dash, showDots, key) {
+    const [x1, y1] = toScreen(start.x, start.y);
+    const [x2, y2] = toScreen(end.x, end.y);
+    ctx.beginPath();
+    ctx.setLineDash(dash);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (showDots) {
+        [{ x: x1, y: y1 }, { x: x2, y: y2 }].forEach(p => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, POINT_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+        });
+    }
+}
+
+function drawPolyline(points, color, lineWidth, showDots) {
+    if (points.length < 2) return;
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    const [sx, sy] = toScreen(points[0].x, points[0].y);
+    ctx.moveTo(sx, sy);
+    for (let i = 1; i < points.length; i++) {
+        const [px, py] = toScreen(points[i].x, points[i].y);
+        ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+
+    if (showDots) {
+        points.forEach(p => {
+            const [px, py] = toScreen(p.x, p.y);
+            ctx.beginPath();
+            ctx.arc(px, py, POINT_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+        });
+    }
+}
+
+// ── Mode switching ──
+
+function setMode(m) {
+    mode = m;
+    document.querySelectorAll(".toolbar button[id^='btn-mode']").forEach(b => b.classList.remove("active"));
+    document.getElementById("btn-mode-" + m).classList.add("active");
+    canvas.style.cursor = m === "view" ? "grab" : "crosshair";
+    render();
+}
+
+// ── Mouse interaction ──
+
+canvas.addEventListener("mousedown", e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (mode === "view") {
+        panStart = { x: mx, y: my, ox: offsetX, oy: offsetY };
+        canvas.style.cursor = "grabbing";
+        return;
+    }
+
+    // Try to grab a point
+    dragging = findPoint(mx, my);
+    if (dragging) {
+        canvas.style.cursor = "none";
+    }
+});
+
+canvas.addEventListener("mousemove", e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (mode === "view" && panStart) {
+        offsetX = panStart.ox + (mx - panStart.x);
+        offsetY = panStart.oy + (my - panStart.y);
+        render();
+        return;
+    }
+
+    if (dragging) {
+        const [ix, iy] = toImage(mx, my);
+        applyDrag(dragging, ix, iy);
+        render();
+    }
+});
+
+canvas.addEventListener("mouseup", () => {
+    panStart = null;
+    dragging = null;
+    canvas.style.cursor = mode === "view" ? "grab" : "crosshair";
+});
+
+canvas.addEventListener("mouseleave", () => {
+    panStart = null;
+    dragging = null;
+});
+
+canvas.addEventListener("wheel", e => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    const newScale = scale * factor;
+    if (newScale < 0.1 || newScale > 10) return;
+
+    // Zoom toward mouse position
+    offsetX = mx - (mx - offsetX) * factor;
+    offsetY = my - (my - offsetY) * factor;
+    scale = newScale;
+    render();
+}, { passive: false });
+
+// ── Point finding ──
+
+function findPoint(mx, my) {
+    const r2 = GRAB_RADIUS * GRAB_RADIUS;
+
+    if (mode === "teeth") {
+        for (let i = 0; i < teethContour.length; i++) {
+            const [sx, sy] = toScreen(teethContour[i].x, teethContour[i].y);
+            if ((mx - sx) ** 2 + (my - sy) ** 2 < r2) {
+                return { type: "teeth", index: i };
+            }
+        }
+    }
+
+    if (mode === "lip") {
+        for (let i = 0; i < lipContour.length; i++) {
+            const [sx, sy] = toScreen(lipContour[i].x, lipContour[i].y);
+            if ((mx - sx) ** 2 + (my - sy) ** 2 < r2) {
+                return { type: "lip", index: i };
+            }
+        }
+    }
+
+    if (mode === "guide" && guidelines) {
+        // Midline endpoints
+        const ml = guidelines.facial_midline;
+        if (ml) {
+            for (const sub of ["start", "end"]) {
+                const [sx, sy] = toScreen(ml[sub].x, ml[sub].y);
+                if ((mx - sx) ** 2 + (my - sy) ** 2 < r2) {
+                    return { type: "guideline_line", key: "facial_midline", subkey: sub };
+                }
+            }
+        }
+        // Interpupillary endpoints
+        const ipd = guidelines.interpupillary;
+        if (ipd) {
+            for (const sub of ["start", "end"]) {
+                const [sx, sy] = toScreen(ipd[sub].x, ipd[sub].y);
+                if ((mx - sx) ** 2 + (my - sy) ** 2 < r2) {
+                    return { type: "guideline_line", key: "interpupillary", subkey: sub };
+                }
+            }
+        }
+        // Smile arc points
+        const arc = guidelines.smile_arc;
+        if (arc) {
+            for (let i = 0; i < arc.length; i++) {
+                const [sx, sy] = toScreen(arc[i].x, arc[i].y);
+                if ((mx - sx) ** 2 + (my - sy) ** 2 < r2) {
+                    return { type: "guideline_poly", key: "smile_arc", index: i };
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+function applyDrag(d, ix, iy) {
+    const rx = Math.round(ix * 10) / 10;
+    const ry = Math.round(iy * 10) / 10;
+
+    if (d.type === "teeth") {
+        teethContour[d.index] = { x: rx, y: ry };
+    } else if (d.type === "lip") {
+        lipContour[d.index] = { x: rx, y: ry };
+    } else if (d.type === "guideline_line") {
+        guidelines[d.key][d.subkey] = { x: rx, y: ry };
+    } else if (d.type === "guideline_poly") {
+        guidelines[d.key][d.index] = { x: rx, y: ry };
+    }
+}
+
+// ── API calls ──
+
+async function saveAll() {
+    const btn = document.getElementById("btn-save");
+    btn.textContent = "Сохраняю...";
+    btn.disabled = true;
+
+    try {
+        // Save contours
+        await fetch(`/smile/api/analysis/${ANALYSIS_ID}/contour/`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF_TOKEN },
+            body: JSON.stringify({ teeth_contour: teethContour, lip_contour: lipContour }),
+        });
+
+        // Save guidelines
+        await fetch(`/smile/api/analysis/${ANALYSIS_ID}/guidelines/`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF_TOKEN },
+            body: JSON.stringify({ guidelines: guidelines }),
+        });
+
+        btn.textContent = "Сохранено!";
+        setTimeout(() => { btn.textContent = "Сохранить"; btn.disabled = false; }, 1500);
+    } catch (err) {
+        btn.textContent = "Ошибка!";
+        btn.disabled = false;
+        console.error(err);
+    }
+}
+
+async function regenerate() {
+    const btn = document.getElementById("btn-regen");
+    btn.textContent = "Запуск...";
+    btn.disabled = true;
+
+    try {
+        const resp = await fetch(`/smile/api/analysis/${ANALYSIS_ID}/regenerate/`, {
+            method: "POST",
+            headers: { "X-CSRFToken": CSRF_TOKEN },
+        });
+        if (resp.ok) {
+            btn.textContent = "Запущено";
+            setTimeout(() => { btn.textContent = "Пересоздать"; btn.disabled = false; }, 3000);
+        } else {
+            const data = await resp.json();
+            btn.textContent = data.error || "Ошибка";
+            btn.disabled = false;
+        }
+    } catch (err) {
+        btn.textContent = "Ошибка!";
+        btn.disabled = false;
+        console.error(err);
+    }
+}
+</script>
+</body>
+</html>

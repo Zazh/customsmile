@@ -24,7 +24,7 @@ class Treatment(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     patient = models.ForeignKey(
         "patient.Patient",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="treatments",
         verbose_name="Пациент",
     )

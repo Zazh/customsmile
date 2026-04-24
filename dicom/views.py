@@ -1,10 +1,12 @@
 from django.conf import settings
+from django.contrib.auth.decorators import login_required
 from django.http import Http404
 from django.shortcuts import get_object_or_404, render
 
 from .models import DicomStudy
 
 
+@login_required
 def viewer(request, study_pk):
     study = get_object_or_404(DicomStudy, pk=study_pk)
     if not study.orthanc_study_id:

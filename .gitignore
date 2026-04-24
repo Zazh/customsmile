@@ -9,3 +9,14 @@ dental_stack_brainstorm.md
 *.log
 .DS_Store
 staticfiles/
+
+# Claude Code local settings
+.claude/
+
+# ML model weights — hosted externally, not in git
+stl/ml/weights/*.tar
+stl/ml/weights/*.zip
+stl/ml/weights/*.pth
+smile/ml/weights/*.tar
+smile/ml/weights/*.zip
+smile/ml/weights/*.pth
